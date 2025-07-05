@@ -1,4 +1,4 @@
-module ov9281_top #(
+module ov9281_config #(
     parameter CLK_SPEED = 50000000, //50 MHz
     parameter DATA_WIDTH = 32, //default 32 bits
 ) ( 
