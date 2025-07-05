@@ -1,16 +1,15 @@
-module ov9281_config #(
-    parameter CLK_FREQ = 50 //50 MHz 
+module ov9281_cfg #(
+    parameter CLK_FREQ = 50000000, //50 MHz 
     parameter DATA_WIDTH = 32 //default 32 bits
 )
 (
     input i_clk,
     input i_rst,
     input i_start, //start signal to begin configuration
-    input read,
-    input write,
-    input num_bytes_rw, //num of bytes to r/w
-    output logic o_done, //indicates configuration is done
-
+    input i_read,
+    input i_write,
+    output o_done, //indicates configuration is done
+    output o_error,
     //physical ports to I2C bus
     input logic i_scl_in, 
     input logic i_sda_in, 
@@ -20,15 +19,17 @@ module ov9281_config #(
     output logic o_scl_oe
 );
 
-localparam SCRIPT_LEN = 95;
+localparam SCRIPT_LEN = 96;
 typedef struct packed {
     logic [15:0] addr; //register address
     logic [7:0] val; //data to write
 } reg_write_t;
 
+reg_write_t current_cmd;
 
 
-const reg_write_t script [SCRIPT_LEN] = ' {
+
+const reg_write_t script [SCRIPT_LEN] = {
     '{16'h0103, 8'h01}, //software reset
     '{16'h0302, 8'h32}, //PLL_CTRL_02
     '{16'h030d, 8'h50}, //PLL_CTRL_OD
@@ -127,7 +128,7 @@ const reg_write_t script [SCRIPT_LEN] = ' {
     '{16'hFFFF, 8'h00}  // Sentinel value to mark the end of the script
 };
 
-/* Register Addresses */ */
+/* Register Addresses */
 localparam SLAVE_ADDR_WRITE = 8'hC0; //I2C write address  
 localparam SLAVE_ADDR_READ = 8'hC1; //I2C read address with ACK
 
@@ -167,10 +168,11 @@ localparam SOFTWARE_STANDBY_MODE = 8'h00;
 localparam STREAMING_MODE = 8'h01; 
 
 
-enum {IDLE, SEND, WRITE, READ, DONE} state, next_state;
+enum {IDLE, SEND, WAIT, ERROR, DONE} state, next_state;
 //state machine for I2C communication
 
 //I2C regs
+logic done, error;
 logic mst_scl_in, mst_sda_in, 
        mst_scl_out, mst_sda_out, 
        mst_sda_oe, mst_scl_oe;
@@ -182,19 +184,9 @@ logic [7:0] i2c_slave_addr, mst_command_byte, mst_num_bytes;
 logic [DATA_WIDTH-1:0] mst_din, mst_data_out;
 logic [$clog2(SCRIPT_LEN)-1:0] cmd_index;
 
-localparam I2C_FAST_MODE = 1; //0 - 100 kHz operating speed for i2c, 1 - 400 kHz operating speed for i2c
-localparam SPIKE_FILTER_CYCLE = 2; //deglitches SDA and SCL for 2 cycles on inputs. Inputs must stay stable for this num of cycles
-localparam SLAVE_ADDR = 8'h00; //set to dummy 0. only useful in SLAVE I2C_MODE
-localparam I2C_MODE = "MASTER";
 
-i2c_ov9281_en #(
-    .CLOCK_FREQ(CLK_FREQ);
-    .DATA_BYTE_WIDTH(DATA_WIDTH);
-    .I2C_FAST_MODE(I2C_FAST_MODE); 
-    .SPIKE_FILTER_CYCLE(SPIKE_FILTER_CYCLE);
-    .SLAVE_ADDR(SLAVE_ADDR);
-    .I2C_MODE(I2C_MODE);
-) i2c_inst (
+
+i2c_ov9281_en i2c_inst (
     .clk ( i_clk ),
     .rst ( i_rst ),
     .mst_scl_in ( i_scl_in ),
@@ -220,7 +212,7 @@ i2c_ov9281_en #(
     .mst_din ( mst_din )
 );
 
-always_ff @(posedge clk) begin
+always_ff @(posedge i_clk) begin
     if (i_rst) begin
         state <= IDLE;
         cmd_index <= 'd0;
@@ -228,9 +220,12 @@ always_ff @(posedge clk) begin
         state <= next_state;
         if (next_state == IDLE) begin 
             cmd_index <= 'd0; 
-            //only increment in SEND STATE
-        end else if (next_state == SEND) begin 
-            cmd_index <= cmd_index + 1; 
+            //only increment after a command is successfully sent
+            //only increments if write operation/not read
+        end else if (next_state == WAIT && !i2c_busy && !i2c_rxak) begin 
+            if (cmd_index < SCRIPT_LEN - 1) begin
+                cmd_index <= cmd_index + 1;
+            end 
         end 
     end
 end
@@ -250,7 +245,7 @@ always_comb begin: state_decoder
         end
 
         SEND: begin
-            //change state when busy is asserted
+            //change state when busy is asserted, should stay for 1 cycle
             if (i2c_busy) begin 
                 next_state = WAIT;
             end else begin 
@@ -259,73 +254,78 @@ always_comb begin: state_decoder
 
         end 
         WAIT: 
-            if (write_done) begin 
-                //not the end of the list of values
-                if (cmd_index == SCRIPT_LEN - 1) begin 
-                    next_state = WAIT_DONE;
-                end else begin 
-                    //go back to sending if this is not ready
-                    next_state = SEND;
+            if (mst_write_done) begin 
+                if (!i2c_busy) begin   
+                    if (i2c_arb_lost || i2c_rxak) begin 
+                        next_state = ERROR; 
+                    end else if (script[cmd_index].addr == 16'hFFFF) begin  
+                        next_state = DONE;
+                    end else begin 
+                        //go back to sending if this is not ready
+                        next_state = SEND;
+                    end
                 end
-            end else begin 
-                next_state = WAIT; 
-            end
-        WAIT_DONE:
-            if (!i2c_busy) begin 
-                if (!i2c_arb_lost && !i2c_rxak) begin 
-                    next_state = DONE;
-                end else begin 
-                    next_state = WAIT_DONE;
-                end
-            end else begin 
-                next_state = WAIT_DONE;
             end 
-
         DONE:
+            next_state = IDLE;
+        ERROR:
+            next_state = ERROR; 
+
         default: next_state = IDLE;
     endcase
 end
 
 always_comb begin: output_decoder
+    //prevent latches
+    mst_read = 1'b0;
+    mst_write = 1'b0;
+    done = 1'b0;
+    error = 1'b0;
+
     case (state)
         IDLE: begin 
             i2c_slave_addr = 16'h0000;
             mst_command_byte = 8'h00; //default command byte
-            o_done = 1'b0; 
+            done = 1'b0; 
         end
 
-        SEND: begin 
-            reg_write_t current_cmd = script[cmd_index];
-            mst_write_done = 1'b0; //not done writing yet
-            mst_data_out_valid = 1'b0; //data not valid yet
-            if (current_cmd.addr != 16'hFFFF) begin 
-                mst_command_byte = current_cmd.addr[15:8]; //high byte
-                num_bytes = 8'd3; //higher byte + lower byte + val
-                //pack low address byte, data value onto 32-bit din bus
-                mst_din <= {16'h0000, current_cmd.val, current_cmd.addr[7:0]};
-                //assert r/w signal
-                if (read) begin
+        SEND: begin
+            if (i_read) begin
                     mst_read = 1'b1; //set read flag
                     mst_write = 1'b0; //clear write flag
                     i2c_slave_addr = SLAVE_ADDR_READ;
-                end else if (write) begin
-                    mst_read = 1'b0; //clear read flag
-                    mst_write = 1'b1; //set write flag
-                    i2c_slave_addr = SLAVE_ADDR_WRITE; //set write address
-                end else begin
-                    mst_read = 1'b0; 
-                    mst_write = 1'b0; 
-                end
+            end else if (i_write) begin
+                current_cmd = script[cmd_index];
+                    if (current_cmd.addr != 16'hFFFF) begin 
+                        mst_read = 1'b0; //clear read flag
+                        mst_write = 1'b1; //set write flag
+                        i2c_slave_addr = SLAVE_ADDR_WRITE; //set write address                    mst_command_byte = current_cmd.addr[15:8]; //high byte
+                        mst_num_bytes = 8'd3; //higher byte + lower byte + val
+                        //pack low address byte, data value onto 32-bit din bus
+                        mst_din = {16'h0000, current_cmd.val, current_cmd.addr[7:0]};
+                    end
             end
-
-
         end
 
         WAIT: begin 
-
+            mst_write =  1'b0; 
+            mst_read = 1'b0; 
         end
 
-        DONE:
-        default:
+        ERROR: begin 
+            error = 1'b1; //set error flag
+            done = 1'b0; //clear done flag
+        end
+
+        DONE: begin 
+            error = 1'b0;
+            done = 1'b1;
+        end 
+
     endcase
 end
+
+assign o_done = done; 
+assign o_error = error;
+
+endmodule
