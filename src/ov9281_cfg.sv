@@ -19,7 +19,7 @@ module ov9281_cfg #(
     output logic o_scl_oe
 );
 
-localparam SCRIPT_LEN = 96;
+localparam SCRIPT_LEN = 109;
 typedef struct packed {
     logic [15:0] addr; //register address
     logic [7:0] val; //data to write
@@ -31,9 +31,22 @@ reg_write_t current_cmd;
 
 const reg_write_t script [SCRIPT_LEN] = {
     '{16'h0103, 8'h01}, //software reset
+    '{16'h030A, 8'h00}, //prediv 0
+    '{16'h0300, 8'h01}, //prediv 1
+    '{16'h0301, 8'h00},
     '{16'h0302, 8'h32}, //PLL_CTRL_02
+    '{16'h0305, 8'h02},
+    '{16'h0306, 8'h01},
+    '{16'h0303, 8'h00},
+    '{16'h0304, 8'h03},
+    '{16'h0314, 8'h00},
+    '{16'h030b, 8'h04},
+    '{16'h030c, 8'h00},
     '{16'h030d, 8'h50}, //PLL_CTRL_OD
     '{16'h030e, 8'h02}, //PLL_CTRL_OE
+    '{16'h030f, 8'h03}, //PLL_CTRL_OE
+    '{16'h0313, 8'h01}, //PLL_CTRL_OE
+    '{16'h0312, 8'h07}, //PLL_CTRL_OE
     '{16'h3001, 8'h00}, //SC_CTRL_01
     '{16'h3004, 8'h00}, //SC_CTRL_04
     '{16'h3005, 8'h00}, //SC_CTRL_05

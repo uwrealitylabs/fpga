@@ -44,8 +44,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 localparam SLAVE_ADDR = 84;
-localparam I2C_FAST_MODE = 0;
+localparam I2C_FAST_MODE = 1;
 localparam I2C_MODE = "MASTER";
 localparam DATA_BYTE_WIDTH = 32;
 localparam CLOCK_FREQ = 100;
-localparam SPIKE_FILTER_CYCLE = 3;
+localparam SPIKE_FILTER_CYCLE = 2;

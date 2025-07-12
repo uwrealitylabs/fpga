@@ -1,0 +1,67 @@
+{
+    "args": [
+        "-o",
+        "i2c_ov9281_en",
+        "--base_path",
+        "/home/bollabollo/dev/ov9281_top/ip",
+        "--vlnv",
+        {
+            "vendor": "efinixinc.com",
+            "library": "serial_interface",
+            "name": "efx_i2c_controller",
+            "version": "5.3"
+        }
+    ],
+    "conf": {
+        "SLAVE_ADDR": "84",
+        "I2C_FAST_MODE": "1",
+        "I2C_MODE": "\"MASTER\"",
+        "DATA_BYTE_WIDTH": "32",
+        "CLOCK_FREQ": "100",
+        "SPIKE_FILTER_CYCLE": "2"
+    },
+    "output": {
+        "external_source_source": [
+            "i2c_ov9281_en/i2c_ov9281_en.v",
+            "i2c_ov9281_en/i2c_ov9281_en_tmpl.vhd",
+            "i2c_ov9281_en/i2c_ov9281_en_tmpl.v",
+            "i2c_ov9281_en/i2c_ov9281_en_define.vh"
+        ],
+        "external_example_example": [
+            "i2c_ov9281_en/T20F256_devkit/i2c_clock_gen.v",
+            "i2c_ov9281_en/T20F256_devkit/i2c_controller_test.v",
+            "i2c_ov9281_en/T20F256_devkit/efx_i2c_master_controller.v",
+            "i2c_ov9281_en/T20F256_devkit/efx_i2c_slave_controller.v",
+            "i2c_ov9281_en/T20F256_devkit/i2c_T20.sdc",
+            "i2c_ov9281_en/T20F256_devkit/i2c_functions.vh",
+            "i2c_ov9281_en/T20F256_devkit/i2c_ov9281_en.v",
+            "i2c_ov9281_en/T20F256_devkit/i2c_ov9281_en_define.vh",
+            "i2c_ov9281_en/T20F256_devkit/i2c_controller_test.peri.xml",
+            "i2c_ov9281_en/T20F256_devkit/i2c_controller_test.xml"
+        ],
+        "external_example_2": [
+            "i2c_ov9281_en/Ti60F225_devkit/i2c_clock_gen.v",
+            "i2c_ov9281_en/Ti60F225_devkit/i2c_controller_test.v",
+            "i2c_ov9281_en/Ti60F225_devkit/efx_i2c_master_controller.v",
+            "i2c_ov9281_en/Ti60F225_devkit/efx_i2c_slave_controller.v",
+            "i2c_ov9281_en/Ti60F225_devkit/i2c_Ti60.sdc",
+            "i2c_ov9281_en/Ti60F225_devkit/i2c_functions.vh",
+            "i2c_ov9281_en/Ti60F225_devkit/i2c_ov9281_en.v",
+            "i2c_ov9281_en/Ti60F225_devkit/i2c_ov9281_en_define.vh",
+            "i2c_ov9281_en/Ti60F225_devkit/i2c_controller_test.peri.xml",
+            "i2c_ov9281_en/Ti60F225_devkit/i2c_controller_test.xml"
+        ],
+        "external_testbench_testbench": [
+            "i2c_ov9281_en/Testbench/i2c_controller_tb.v",
+            "i2c_ov9281_en/Testbench/i2c_controller_test.v",
+            "i2c_ov9281_en/Testbench/efx_i2c_master_controller.v",
+            "i2c_ov9281_en/Testbench/efx_i2c_slave_controller.v",
+            "i2c_ov9281_en/Testbench/modelsim.do",
+            "i2c_ov9281_en/Testbench/i2c_ov9281_en.v",
+            "i2c_ov9281_en/Testbench/i2c_ov9281_en_define.vh"
+        ]
+    },
+    "ooc_synthesis": {},
+    "sw_version": "2025.1.110",
+    "generated_date": "2025-07-05T19:58:28.264006+00:00"
+}

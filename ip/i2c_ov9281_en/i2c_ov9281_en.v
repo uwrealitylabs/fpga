@@ -43,7 +43,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-`define IP_UUID _40d1206aab0b4af2b66122cfb5858c53
+`define IP_UUID _09bb16d4a7374b619fe698133aec91cd
 `define IP_NAME_CONCAT(a,b) a``b
 `define IP_MODULE_NAME(name) `IP_NAME_CONCAT(name,`IP_UUID)
 module i2c_ov9281_en
@@ -74,11 +74,11 @@ module i2c_ov9281_en
 `IP_MODULE_NAME(i2c_controller)
 #(
     .SLAVE_ADDR (84),
-    .I2C_FAST_MODE (0),
+    .I2C_FAST_MODE (1),
     .I2C_MODE ("MASTER"),
     .DATA_BYTE_WIDTH (32),
     .CLOCK_FREQ (100),
-    .SPIKE_FILTER_CYCLE (3)
+    .SPIKE_FILTER_CYCLE (2)
 )
 u_i2c_controller
 (
