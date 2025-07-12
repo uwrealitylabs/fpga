@@ -1,6 +1,8 @@
 module ov9281_cfg #(
     parameter CLK_FREQ = 50000000, //50 MHz 
-    parameter DATA_WIDTH = 32 //default 32 bits
+    parameter I2C_DATA_WIDTH = 32,
+    parameter REG_ADDR_WIDTH = 16,
+    parameter REG_DATA_WIDTH = 8 
 )
 (
     input i_clk,
@@ -8,8 +10,20 @@ module ov9281_cfg #(
     input i_start, //start signal to begin configuration
     input i_read,
     input i_write,
-    output o_done, //indicates configuration is done
+    input i_cfg,
+    input [REG_ADDR_WIDTH-1:0] i_raddr,
+    input [REG_ADDR_WIDTH-1:0] i_waddr,
+    input [REG_DATA_WIDTH-1:0] i_wdata,
+    output o_busy, //indicates operation is in progress
+    output o_valid, //indicates that data to be read is valid
     output o_error,
+    output [REG_DATA_WIDTH-1:0] o_rdata,
+
+    //two temporary ports for validation and testing
+    output [REG_ADDR_WIDTH-1:0] o_cfg_addr,
+    output [REG_DATA_WIDTH-1:0] o_cfg_data,
+    output o_led,
+
     //physical ports to I2C bus
     input logic i_scl_in, 
     input logic i_sda_in, 
@@ -21,8 +35,8 @@ module ov9281_cfg #(
 
 localparam SCRIPT_LEN = 109;
 typedef struct packed {
-    logic [15:0] addr; //register address
-    logic [7:0] val; //data to write
+    logic [REG_ADDR_WIDTH-1:0] addr; //register address
+    logic [REG_DATA_WIDTH-1:0] val; //data to write
 } reg_write_t;
 
 reg_write_t current_cmd;
@@ -185,7 +199,7 @@ enum {IDLE, SEND, WAIT, ERROR, DONE} state, next_state;
 //state machine for I2C communication
 
 //I2C regs
-logic done, error;
+logic busy, error, valid;
 logic mst_scl_in, mst_sda_in, 
        mst_scl_out, mst_sda_out, 
        mst_sda_oe, mst_scl_oe;
@@ -194,8 +208,9 @@ logic i2c_busy, i2c_soft_rst, i2c_rxak,
 logic mst_read, mst_write, mst_write_done, 
         mst_data_out_valid;
 logic [7:0] i2c_slave_addr, mst_command_byte, mst_num_bytes;
-logic [DATA_WIDTH-1:0] mst_din, mst_data_out;
+logic [I2C_DATA_WIDTH-1:0] mst_din, mst_data_out;
 logic [$clog2(SCRIPT_LEN)-1:0] cmd_index;
+logic [REG_DATA_WIDTH-1:0] rdata;
 
 
 
@@ -225,20 +240,23 @@ i2c_ov9281_en i2c_inst (
     .mst_din ( mst_din )
 );
 
+logic [REG_ADDR_WIDTH-1:0] cfg_addr;
+logic [REG_DATA_WIDTH-1:0] cfg_data;
+
 always_ff @(posedge i_clk) begin
     if (i_rst) begin
         state <= IDLE;
         cmd_index <= 'd0;
     end else begin
         state <= next_state;
-        if (next_state == IDLE) begin 
-            cmd_index <= 'd0; 
-            //only increment after a command is successfully sent
-            //only increments if write operation/not read
-        end else if (next_state == WAIT && !i2c_busy && !i2c_rxak) begin 
+        if (state == WAIT && !i2c_busy && !i2c_rxak) begin 
             if (cmd_index < SCRIPT_LEN - 1) begin
                 cmd_index <= cmd_index + 1;
-            end 
+            end else begin 
+                cmd_index <= 'd0; 
+            end
+        end else begin 
+            cmd_index <= cmd_index; 
         end 
     end
 end
@@ -266,19 +284,38 @@ always_comb begin: state_decoder
             end 
 
         end 
-        WAIT: 
-            if (mst_write_done) begin 
-                if (!i2c_busy) begin   
-                    if (i2c_arb_lost || i2c_rxak) begin 
-                        next_state = ERROR; 
-                    end else if (script[cmd_index].addr == 16'hFFFF) begin  
-                        next_state = DONE;
+        WAIT: begin
+            if (i_write) begin 
+                if (mst_write_done) begin 
+                    if (!i2c_busy) begin   
+                        if (i2c_arb_lost || i2c_rxak) begin 
+                            next_state = ERROR; 
+                        end else if (script[cmd_index].addr == 16'hFFFF) begin  
+                            next_state = DONE;
+                        end else begin 
+                            //go back to sending if this is not ready
+                            next_state = SEND;
+                        end
+                    end
+                end 
+            end 
+
+            if (i_read) begin 
+                if (mst_data_out_valid) begin
+                    if (!i2c_busy) begin
+                        if (i2c_arb_lost || i2c_rxak) begin 
+                            next_state = ERROR; 
+                        end else begin 
+                            //read operation done, go to DONE state
+                            next_state = DONE;
+                        end
                     end else begin 
-                        //go back to sending if this is not ready
-                        next_state = SEND;
+                        next_state = WAIT; //stay in wait state until read is done
                     end
                 end
-            end 
+            end
+        end
+
         DONE:
             next_state = IDLE;
         ERROR:
@@ -289,56 +326,96 @@ always_comb begin: state_decoder
 end
 
 always_comb begin: output_decoder
-    //prevent latches
-    mst_read = 1'b0;
-    mst_write = 1'b0;
-    done = 1'b0;
-    error = 1'b0;
-
     case (state)
         IDLE: begin 
             i2c_slave_addr = 16'h0000;
             mst_command_byte = 8'h00; //default command byte
-            done = 1'b0; 
+            mst_read = 1'b0;
+            mst_write = 1'b0;
+            busy = 1'b0;
+            error = 1'b0;
+            valid = 1'b0;
+            rdata = 0;
+            cfg_addr = 0;
+            cfg_data = 0;
         end
 
         SEND: begin
+            busy = 1'b1;
             if (i_read) begin
                     mst_read = 1'b1; //set read flag
                     mst_write = 1'b0; //clear write flag
                     i2c_slave_addr = SLAVE_ADDR_READ;
             end else if (i_write) begin
-                current_cmd = script[cmd_index];
+                if (i_cfg) begin 
+                    //writing default configuration script to device
+                    current_cmd = script[cmd_index];
                     if (current_cmd.addr != 16'hFFFF) begin 
                         mst_read = 1'b0; //clear read flag
                         mst_write = 1'b1; //set write flag
-                        i2c_slave_addr = SLAVE_ADDR_WRITE; //set write address                    mst_command_byte = current_cmd.addr[15:8]; //high byte
+                        i2c_slave_addr = SLAVE_ADDR_WRITE; //set write address                    
+                        mst_command_byte = current_cmd.addr[15:8]; //high byte
                         mst_num_bytes = 8'd3; //higher byte + lower byte + val
                         //pack low address byte, data value onto 32-bit din bus
                         mst_din = {16'h0000, current_cmd.val, current_cmd.addr[7:0]};
+                        cfg_addr = current_cmd.addr;
+                        cfg_data = current_cmd.val;
                     end
+                end else begin 
+                    mst_read = 1'b1;
+                    mst_write = 1'b0;
+                    //writing to a single register
+                    i2c_slave_addr = SLAVE_ADDR_WRITE; //set write address
+                    mst_command_byte = i_waddr[15:8]; //high byte of address
+                    mst_num_bytes = 8'd1; //read one register to one byte? - could modify this to make it more robust
+                    
+                    cfg_addr = i_waddr;
+                    cfg_data = i_wdata;
+                end
             end
         end
 
         WAIT: begin 
-            mst_write =  1'b0; 
+            busy = 1'b1;
+            mst_write = 1'b0; 
             mst_read = 1'b0; 
         end
 
         ERROR: begin 
             error = 1'b1; //set error flag
-            done = 1'b0; //clear done flag
+            busy = 1'b0; 
+            valid = 1'b0; 
         end
 
         DONE: begin 
             error = 1'b0;
-            done = 1'b1;
+            busy = 1'b0;
+            valid = 1'b1;
+            if (i_read) begin
+                rdata = mst_data_out; //read data from I2C bus
+            end
         end 
-
+        default: begin
+            i2c_slave_addr = 16'h0000;
+            mst_command_byte = 8'h00; //default command byte
+            mst_read = 1'b0;
+            mst_write = 1'b0;
+            busy = 1'b0;
+            error = 1'b0;
+            valid = 1'b0;
+            rdata = 0;
+            cfg_addr = 0;
+            cfg_data = 0;
+        end
     endcase
 end
 
-assign o_done = done; 
+assign o_busy = busy; 
+assign o_valid = valid;
 assign o_error = error;
+assign o_cfg_addr = cfg_addr;
+assign o_cfg_data = cfg_data;
+assign o_rdata = rdata;
+assign o_led = (state == DONE) ? 1'b1 : 1'b0;
 
 endmodule
